@@ -1,0 +1,209 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#12050a">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="apple-touch-icon" href="icon.png">
+<link rel="manifest" href="manifest.webmanifest">
+<title>사신의 선정 게임</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#080408;color:white;font-family:-apple-system,BlinkMacSystemFont,"Apple SD Gothic Neo",sans-serif}
+main{max-width:850px;margin:auto}
+.scene{position:relative;aspect-ratio:3/2;background:#200911 url('scene.jpg') center/100% 100% no-repeat;overflow:hidden}
+.pods{position:absolute;left:8%;right:8%;top:36%;height:33%;display:flex;gap:2%;align-items:stretch}
+.pod{flex:1;position:relative;border:2px solid transparent;border-radius:45% 45% 12% 12%;transition:.15s;min-width:0}
+.pod.active{background:#ff174455;border-color:#ffb3bf;box-shadow:0 0 22px #ff1744,inset 0 0 25px #ff1744}
+.pod.out{background:#050408bb;filter:grayscale(1);opacity:.8}
+.pod.win{border:3px solid #ffe6a5;background:#ff234866;box-shadow:0 0 40px #ff2c4c;animation:pulse .5s infinite alternate}
+@keyframes pulse{to{box-shadow:0 0 65px #ff3c51}}
+.names{position:absolute;left:8%;right:8%;top:54%;display:flex;gap:2%;pointer-events:none}
+.names span{flex:1;min-width:0;text-align:center;font-size:clamp(9px,2.8vw,19px);font-weight:900;text-shadow:0 2px 5px black,0 0 10px #f22;overflow:hidden;white-space:nowrap}
+.panel{background:#170910;padding:16px;display:grid;gap:13px}
+.status{text-align:center;min-height:48px;display:grid;place-items:center;color:#ffb6c3;font-size:17px;font-weight:800}
+button{font:inherit;cursor:pointer}
+.primary{width:100%;padding:15px;background:linear-gradient(#e62a47,#810c24);color:white;border:2px solid #ff8095;border-radius:13px;font-size:21px;font-weight:900}
+.primary:disabled{opacity:.5}
+.secondary{background:#2d131e;border:1px solid #965367;color:#fff;padding:10px 14px;border-radius:9px}
+.actions{display:flex;gap:9px;justify-content:center;align-items:center;flex-wrap:wrap}
+.result{text-align:center;background:#440d20;border:1px solid #ff5770;padding:18px;border-radius:13px}
+.result strong{display:block;font-size:clamp(30px,8vw,50px);margin:9px 0;color:#fff;text-shadow:0 0 20px #ff2849;overflow-wrap:anywhere}
+.settings{background:#230e18;border:1px solid #703246;padding:15px;border-radius:12px;display:none}
+.settings.open{display:grid;gap:12px}
+label{font-size:13px;color:#efbdc6}
+textarea,input[type=number]{width:100%;padding:12px;background:#11080d;border:1px solid #8b4055;border-radius:8px;color:white;font:inherit}
+textarea{min-height:105px;resize:vertical}
+.note{font-size:12px;color:#d09eaa;line-height:1.6}
+.meta{display:flex;justify-content:space-between;color:#e9a8b5;font-size:12px}
+.flash{animation:flash .25s}
+@keyframes flash{50%{filter:brightness(2.4)}}
+</style>
+</head>
+<body>
+<main>
+<div class="scene" id="scene">
+<div class="pods" id="pods"></div>
+<div class="names" id="names"></div>
+</div>
+<div class="panel">
+<div class="meta"><span id="meta">후보 6명 · 선정 1명</span><span>♥ <span id="bpm">--</span> BPM</span></div>
+<div class="status" id="status">사신이 운명을 기다리고 있다…</div>
+<div class="result" id="result" hidden><div>☠ THE CHOSEN ONE ☠</div><strong id="winners"></strong><div>최종 선정 완료</div></div>
+<button class="primary" id="start">☠ 선정 시작 ☠</button>
+<div class="actions">
+<button class="secondary" id="settingsBtn">⚙ 참여자 · 선정 인원 설정</button>
+<button class="secondary" id="reset">↻ 초기화</button>
+<label><input type="checkbox" id="sound" checked> 효과음</label>
+</div>
+<div class="settings" id="settings">
+<label for="people">참여자 이름 (줄바꿈 또는 쉼표로 구분)</label>
+<textarea id="people">형욱
+형환
+정오
+현호
+승호
+명관</textarea>
+<label for="number">선정할 인원 수</label>
+<input id="number" type="number" min="1" value="1">
+<button class="primary" id="apply">설정 저장 · 적용</button>
+<div class="note">참여자는 2~30명까지 설정할 수 있습니다. 참가자가 5명을 초과하면 캡슐을 여러 줄로 표시합니다. 추첨은 중복 없이 진행됩니다.</div>
+</div>
+<div class="note" id="foot" style="text-align:center">모든 참가자의 당첨 확률은 동일합니다.</div>
+</div>
+</main>
+<script>
+(()=>{
+const $=id=>document.getElementById(id);
+const defaults=['형욱','형환','정오','현호','승호','명관'];
+let people=defaults.slice(),pick=1,run=0,busy=false,audio;
+try{
+const saved=JSON.parse(localStorage.getItem('reaperSettings')||'null');
+if(saved&&Array.isArray(saved.people)&&saved.people.length>=2&&saved.people.length<=30){
+people=saved.people;pick=Math.max(1,Math.min(people.length,Number(saved.pick)||1));
+}
+}catch(e){}
+const sleep=ms=>new Promise(r=>setTimeout(r,ms));
+function random(n){
+const a=new Uint32Array(1);crypto.getRandomValues(a);
+return Math.floor(a[0]/(4294967296/n));
+}
+function beep(freq=130,duration=.12){
+if(!$('sound').checked)return;
+try{
+audio=audio||new(window.AudioContext||window.webkitAudioContext)();
+if(audio.state==='suspended')audio.resume();
+const o=audio.createOscillator(),g=audio.createGain();
+o.type='sawtooth';o.frequency.value=freq;
+g.gain.setValueAtTime(.035,audio.currentTime);
+g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);
+o.connect(g);g.connect(audio.destination);o.start();o.stop(audio.currentTime+duration);
+}catch(e){}
+}
+function draw(){
+const pods=$('pods'),names=$('names');
+pods.innerHTML='';names.innerHTML='';
+const n=people.length;
+if(n>5){
+pods.style.cssText='left:5%;right:5%;top:31%;height:39%;display:grid;grid-template-columns:repeat('+Math.min(n,6)+',minmax(0,1fr));grid-auto-rows:1fr;gap:3px';
+names.style.display='none';
+}else{
+pods.style.cssText='';
+names.style.display='flex';
+}
+people.forEach((name,i)=>{
+const p=document.createElement('div');p.className='pod';p.dataset.index=i;
+if(n>5){
+p.style.cssText='border-radius:10px;background:#330916aa;border:1px solid #9d4057;display:grid;place-items:center;font-weight:900;font-size:clamp(11px,3vw,20px);text-shadow:0 0 8px #f44;overflow:hidden';
+p.textContent=name;
+}else{
+const s=document.createElement('span');s.textContent=name;names.appendChild(s);
+}
+pods.appendChild(p);
+});
+$('meta').textContent='후보 '+n+'명 · 선정 '+pick+'명';
+$('foot').textContent='각 참가자 당첨 확률 '+(pick/n*100).toFixed(2)+'% · 중복 선정 없음';
+}
+function reset(){
+run++;busy=false;
+document.querySelectorAll('.pod').forEach(p=>p.classList.remove('active','out','win'));
+$('status').textContent='사신이 운명을 기다리고 있다…';
+$('result').hidden=true;$('bpm').textContent='--';
+$('start').disabled=false;$('start').textContent='☠ 선정 시작 ☠';
+}
+async function scan(ids,ms,t){
+let elapsed=0;
+while(elapsed<ms&&t===run){
+document.querySelectorAll('.pod').forEach(p=>p.classList.remove('active'));
+const i=ids[random(ids.length)];
+document.querySelectorAll('.pod')[i].classList.add('active');
+beep(100+random(190),.07);
+const d=elapsed<ms*.7?110:220;
+await sleep(d);elapsed+=d;
+}
+document.querySelectorAll('.pod').forEach(p=>p.classList.remove('active'));
+}
+async function play(){
+if(busy)return;
+reset();busy=true;
+$('start').disabled=true;$('start').textContent='⚠ 선정 진행 중';
+const t=run,n=people.length;
+const order=Array.from({length:n},(_,i)=>i);
+for(let i=n-1;i>0;i--){const j=random(i+1);[order[i],order[j]]=[order[j],order[i]];}
+const chosen=order.slice(0,pick);
+const excluded=order.slice(pick);
+let alive=Array.from({length:n},(_,i)=>i);
+$('bpm').textContent='92';
+const maxRounds=Math.min(excluded.length,6);
+for(let r=0;r<maxRounds;r++){
+if(t!==run)return;
+$('status').textContent='⚠ 사신이 운명을 판독하고 있다… '+(r+1)+' / '+maxRounds;
+await scan(alive,Math.max(550,1600-r*110),t);
+if(t!==run)return;
+const removeCount=r===maxRounds-1?excluded.length-r:1;
+const targets=excluded.slice(r,r+removeCount);
+targets.forEach(i=>document.querySelectorAll('.pod')[i].classList.add('out'));
+alive=alive.filter(i=>!targets.includes(i));
+$('bpm').textContent=String(100+r*12);
+beep(55,.4);
+$('scene').classList.add('flash');await sleep(250);$('scene').classList.remove('flash');
+}
+if(t!==run)return;
+$('status').textContent='⚠ 최종 선정자를 공개합니다…';
+await scan(chosen,1700,t);
+for(let c=3;c>=1;c--){
+if(t!==run)return;
+$('status').textContent=String(c);beep(110+c*35,.35);await sleep(850);
+}
+if(t!==run)return;
+chosen.forEach(i=>document.querySelectorAll('.pod')[i].classList.add('win'));
+$('winners').textContent=chosen.map(i=>people[i]).join(' · ');
+$('result').hidden=false;
+$('status').textContent='☠ 사신의 선택이 내려졌다 ☠';
+$('bpm').textContent='0';beep(50,1.3);
+$('start').disabled=false;$('start').textContent='☠ 다시 추첨하기';busy=false;
+}
+$('start').addEventListener('click',play);
+$('reset').addEventListener('click',reset);
+$('settingsBtn').addEventListener('click',()=>{
+if(busy)return;
+$('settings').classList.toggle('open');
+});
+$('apply').addEventListener('click',()=>{
+const list=$('people').value.split(/[,\n]+/).map(x=>x.trim()).filter(Boolean);
+const unique=[...new Set(list)];
+const k=Number($('number').value);
+if(unique.length<2||unique.length>30){alert('참여자는 2~30명이어야 합니다.');return;}
+if(!Number.isInteger(k)||k<1||k>unique.length){alert('선정 인원은 1명부터 참여자 수까지 가능합니다.');return;}
+people=unique;pick=k;
+try{localStorage.setItem('reaperSettings',JSON.stringify({people,pick}));}catch(e){}
+reset();draw();$('settings').classList.remove('open');
+});
+$('people').value=people.join('\n');$('number').value=pick;
+draw();
+})();
+</script>
+</body>
+</html>
